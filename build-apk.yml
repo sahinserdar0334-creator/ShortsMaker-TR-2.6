@@ -1,0 +1,50 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find project (unzip if uploaded as zip)
+        run: |
+          find . -maxdepth 2 -name '*.zip' -not -path './.git/*' -exec unzip -o -q {} -d unzipped_project \;
+          ROOT=$(find . -name 'settings.gradle.kts' -not -path './.git/*' | head -1)
+          if [ -z "$ROOT" ]; then
+            echo "settings.gradle.kts not found. Repo contents:"
+            ls -R | head -60
+            exit 1
+          fi
+          echo "PROJECT_DIR=$(dirname "$ROOT")" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Accept Android SDK licenses (SDK is preinstalled on the runner)
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.10.2
+
+      - name: Build release APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle :app:assembleRelease --no-daemon
+
+      # النسخة تُرفع إلى Releases (لا تستهلك حصة Artifacts)
+      - name: Publish APK to Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Shorts Maker TR build ${{ github.run_number }}
+          files: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/release/*.apk
+          prerelease: false
